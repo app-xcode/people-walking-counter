@@ -36,7 +36,7 @@ Just open the `index.html` file in a modern browser (Chrome recommended).
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/people-walking-counter.git
+   git clone https://github.com/app-xcode/people-walking-counter.git
    cd people-walking-counter
    ```
 
