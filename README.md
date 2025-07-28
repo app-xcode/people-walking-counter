@@ -29,6 +29,8 @@ This app detects and counts walking people from a live camera or uploaded video 
 
 ### Online Use
 
+Open the demo here: [https://app-xcode.github.io/people-walking-counter/](https://app-xcode.github.io/people-walking-counter/)
+or
 Just open the `index.html` file in a modern browser (Chrome recommended).
 
 ### Local Use
