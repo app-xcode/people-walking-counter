@@ -1,201 +1,196 @@
 <!DOCTYPE html>
-<html>
+<html lang="id">
 
 <head>
-    <title>People Counter</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-    <style>
-        canvas {
-            pointer-events: none
-        }
-
-        ;
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>People Counter</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    canvas {
+      pointer-events: none;
+    }
+  </style>
 </head>
 
-<body>
-    <h1>Total Orang Terhitung: <span id="count">0</span></h1>
+<body class="bg-gray-100 text-gray-900">
+  <div class="container mx-auto p-6">
+    <div class="bg-white shadow-lg rounded-xl p-6">
+      <h1 class="text-2xl font-semibold mb-4 text-center">Total Orang Terhitung: <span id="count"
+          class="font-bold text-green-600">0</span></h1>
 
-    <label for="cameraSelect">Pilih Kamera:</label>
-    <select id="cameraSelect"></select>
-    <br>
-    <label for="videoUpload">Atau Unggah Video:</label>
-    <input type="file" id="videoUpload" accept="video/*">
-    <br><br>
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="cameraSelect" class="block text-sm font-medium mb-1">Pilih Kamera:</label>
+          <select id="cameraSelect"
+            class="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+          </select>
+        </div>
 
-    <div style="position: relative;">
-        <video id="webcam" autoplay playsinline width="640" height="480" controls></video>
-        <canvas id="canvas" width="640" height="480" style="position:absolute; top:0; left:0;"></canvas>
+        <div>
+          <label for="videoUpload" class="block text-sm font-medium mb-1">Atau Unggah Video:</label>
+          <input type="file" id="videoUpload" accept="video/*"
+            class="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm bg-white file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+        </div>
+      </div>
+
+      <div class="relative mt-6">
+        <canvas id="canvas" class="absolute top-0 left-0 w-full z-10"></canvas>
+        <video id="webcam" autoplay playsinline controls class="w-full rounded-lg shadow-md"></video>
+      </div>
     </div>
+  </div>
 
-    <script>
-        const video = document.getElementById('webcam');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const countDisplay = document.getElementById('count');
-        const cameraSelect = document.getElementById('cameraSelect');
-        const videoUpload = document.getElementById('videoUpload');
+  <script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const countDisplay = document.getElementById('count');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const videoUpload = document.getElementById('videoUpload');
+    let model;
 
-        let currentStream;
-        let isUploadedVideo = false;
-        let totalCount = 0;
-        let trackedObjects = [];
-        let nextId = 0;
+    video.addEventListener('play', function () {
+      const bct = video.getBoundingClientRect();
+      canvas.height = bct.height;
+      canvas.width = bct.width;
+      detectFrame(model);
+    });
 
-        async function getCameras() {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+    let currentStream;
+    let isUploadedVideo = false;
+    let totalCount = 0;
+    let trackedObjects = [];
+    let nextId = 0;
 
-            cameraSelect.innerHTML = '';
-            videoDevices.forEach((device, index) => {
-                const option = document.createElement('option');
-                option.value = device.deviceId;
-                option.text = device.label || `Kamera ${index + 1}`;
-                cameraSelect.appendChild(option);
-            });
-        }
+    async function getCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      cameraSelect.innerHTML = '';
+      videoDevices.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.text = device.label || `Kamera ${index + 1}`;
+        cameraSelect.appendChild(option);
+      });
+    }
 
-        async function setupCamera(deviceId) {
-            if (currentStream) {
-                currentStream.getTracks().forEach(track => track.stop());
-            }
+    async function setupCamera(deviceId) {
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+      const constraints = {
+        video: { deviceId: deviceId ? { exact: deviceId } : undefined },
+        audio: false
+      };
+      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = currentStream;
+      isUploadedVideo = false;
+      return new Promise(resolve => {
+        video.onloadedmetadata = () => resolve(video);
+      });
+    }
 
-            const constraints = {
-                video: { deviceId: deviceId ? { exact: deviceId } : undefined },
-                audio: false
-            };
-            currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-            video.srcObject = currentStream;
-            isUploadedVideo = false;
-            return new Promise(resolve => {
-                video.onloadedmetadata = () => resolve(video);
-            });
-        }
+    async function run(model) {
+      if (!isUploadedVideo) {
+        await setupCamera(cameraSelect.value);
+        video.play();
+      }
+      detectFrame(model);
+    }
 
-        async function run(model) {
-            if (!isUploadedVideo) {
-                await setupCamera(cameraSelect.value);
-                video.play();
-            }
-            detectFrame(model);
-        }
+    function getCentroid(bbox) {
+      const [x, y, w, h] = bbox;
+      return [x + w / 2, y + h / 2];
+    }
 
-        function iou(box1, box2) {
-            const [x1, y1, w1, h1] = box1;
-            const [x2, y2, w2, h2] = box2;
+    function euclideanDistance(a, b) {
+      return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
+    }
 
-            const xi1 = Math.max(x1, x2);
-            const yi1 = Math.max(y1, y2);
-            const xi2 = Math.min(x1 + w1, x2 + w2);
-            const yi2 = Math.min(y1 + h1, y2 + h2);
-            const interArea = Math.max(0, xi2 - xi1) * Math.max(0, yi2 - yi1);
+    async function detectFrame(model) {
+      const detect = async () => {
+        if (video.paused || video.ended) return;
 
-            const box1Area = w1 * h1;
-            const box2Area = w2 * h2;
-            const unionArea = box1Area + box2Area - interArea;
+        const predictions = await model.detect(video);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            return interArea / unionArea;
-        }
+        const currentFrameObjects = [];
 
-        function getCentroid(bbox) {
-            const [x, y, w, h] = bbox;
-            return [x + w / 2, y + h / 2];
-        }
-
-        function euclideanDistance(a, b) {
-            return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
-        }
-
-        async function detectFrame(model) {
-            const detect = async () => {
-                if (video.paused || video.ended) return;
-
-                const predictions = await model.detect(video);
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                const currentFrameObjects = [];
-
-                predictions.forEach(pred => {
-                    if (pred.class === 'person' && pred.score > 0.6) {
-                        currentFrameObjects.push(pred.bbox);
-                    }
-                });
-
-                // Update tracking based on centroid distance
-                const matchedIndexes = new Set();
-                currentFrameObjects.forEach(bbox => {
-                    const centroid = getCentroid(bbox);
-                    let matched = false;
-
-                    for (let obj of trackedObjects) {
-                        const objCentroid = getCentroid(obj.bbox);
-                        const distance = euclideanDistance(centroid, objCentroid);
-                        if (distance < 50) { // threshold jarak cocok
-                            obj.bbox = bbox;
-                            obj.framesSinceSeen = 0;
-                            matched = true;
-                            matchedIndexes.add(obj.id);
-                            break;
-                        }
-                    }
-
-                    if (!matched) {
-                        trackedObjects.push({ id: nextId++, bbox: bbox, framesSinceSeen: 0 });
-                        totalCount++;
-                    }
-                });
-
-                // Update seen count
-                trackedObjects.forEach(obj => {
-                    if (!matchedIndexes.has(obj.id)) {
-                        obj.framesSinceSeen++;
-                    }
-                });
-
-                // Hapus objek lama
-                trackedObjects = trackedObjects.filter(obj => obj.framesSinceSeen < 30);
-
-                // Gambar objek
-                trackedObjects.forEach(obj => {
-                    const [x, y, w, h] = obj.bbox;
-                    ctx.strokeStyle = "#00FF00";
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(x, y, w, h);
-                    ctx.fillStyle = "#00FF00";
-                    ctx.fillText("ID: " + obj.id, x, y > 10 ? y - 5 : 10);
-                });
-
-                countDisplay.textContent = totalCount;
-                requestAnimationFrame(() => detectFrame(model));
-            };
-
-            detect();
-        }
-
-
-        videoUpload.addEventListener('change', async (event) => {
-            const file = event.target.files[0];
-            if (file) {
-                const fileURL = URL.createObjectURL(file);
-                video.src = fileURL;
-                isUploadedVideo = true;
-                const model = await cocoSsd.load();
-                video.play();
-                detectFrame(model);
-            }
+        predictions.forEach(pred => {
+          if (pred.class === 'person' && pred.score > 0.6) {
+            currentFrameObjects.push(pred.bbox);
+          }
         });
 
-        (async () => {
-            await getCameras();
-            const model = await cocoSsd.load();
-            await run(model);
+        const matchedIndexes = new Set();
+        currentFrameObjects.forEach(bbox => {
+          const centroid = getCentroid(bbox);
+          let matched = false;
+          for (let obj of trackedObjects) {
+            const objCentroid = getCentroid(obj.bbox);
+            const distance = euclideanDistance(centroid, objCentroid);
+            if (distance < 100) {
+              obj.bbox = bbox;
+              obj.framesSinceSeen = 0;
+              matched = true;
+              matchedIndexes.add(obj.id);
+              break;
+            }
+          }
+          if (!matched) {
+            trackedObjects.push({ id: nextId++, bbox: bbox, framesSinceSeen: 0 });
+            totalCount++;
+          }
+        });
 
-            cameraSelect.addEventListener('change', () => {
-                run(model);
-            });
-        })();
-    </script>
+        trackedObjects.forEach(obj => {
+          if (!matchedIndexes.has(obj.id)) {
+            obj.framesSinceSeen++;
+          }
+        });
+
+        trackedObjects = trackedObjects.filter(obj => obj.framesSinceSeen < 30);
+
+        trackedObjects.forEach(obj => {
+          const [x, y, w, h] = obj.bbox;
+          ctx.strokeStyle = "#00FF00";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x, y + 50, w - (w * 0.25), h + 50);
+          ctx.fillStyle = "#00FF00";
+          ctx.fillText("ID: " + obj.id, x, (y > 10 ? y - 5 : 10) + 50);
+        });
+
+        countDisplay.textContent = totalCount;
+        requestAnimationFrame(() => detectFrame(model));
+      };
+
+      detect();
+    }
+
+    videoUpload.addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        const fileURL = URL.createObjectURL(file);
+        video.src = fileURL;
+        isUploadedVideo = true;
+        model = await cocoSsd.load();
+        video.play();
+        detectFrame(model);
+      }
+    });
+
+    (async () => {
+      await getCameras();
+      model = await cocoSsd.load();
+      await run(model);
+      cameraSelect.addEventListener('change', () => {
+        run(model);
+      });
+    })();
+  </script>
 </body>
 
 </html>
